@@ -7,12 +7,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.core.cache import cache
 from django.db.models import Q, OuterRef, Exists
-from django.contrib.auth.models import AnonymousUser
 
 from care.emr.models.device import Device
 from care.security.authorization.base import AuthorizationController
-from rest_framework.authentication import BaseAuthentication
-from rest_framework.permissions import BasePermission
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
@@ -22,28 +19,13 @@ from rest_framework.viewsets import ViewSet
 from care.emr.models.patient import Patient
 from care.emr.models.service_request import ServiceRequest
 from care_radiology.models.radiology_service_request import RadiologyServiceRequest
+from care_radiology.authentication import StaticAPIKeyAuthentication
 from care_radiology.models.dicom_study import DicomStudy
+from care_radiology.models.mpps_status import RadiologyMppsStatus
 from care_radiology.models.study_report import StudyReport
 
 
 DCM4CHEE_BASEURL = settings.PLUGIN_CONFIGS['care_radiology']['CARE_RADIOLOGY_DCM4CHEE_DICOMWEB_BASEURL']
-STATIC_API_KEY = settings.PLUGIN_CONFIGS['care_radiology']['CARE_RADIOLOGY_WEBHOOK_SECRET']
-
-class StaticAPIKeyAuthentication(BaseAuthentication, BasePermission):
-    def authenticate(self, request):
-        api_key = request.headers.get("Authorization")
-        if api_key == STATIC_API_KEY:
-            return (AnonymousUser(), None)
-        raise AuthenticationFailed("Invalid API key")
-
-    def has_permission(self, request):
-        api_key = request.headers.get("Authorization")
-        if api_key == STATIC_API_KEY:
-            return (AnonymousUser(), None)
-        raise AuthenticationFailed("Invalid API key")
-
-
-
 class DICOM_TAG(Enum):
     # Study Tags
     StudyInstanceUID = "0020000D"
@@ -200,9 +182,12 @@ class DicomViewSet(ViewSet):
             for future in as_completed(future_to_study):
                 result = future.result()
                 if result is not None:
-                    results.append(result)
+                    results.append({**result, "is_pending": False})
 
-        return Response(results, status=200)
+        results.sort(key=lambda s: s["study_date"] or "", reverse=True)
+        pending = get_pending_mpps_studies(service_request__patient=patient)
+
+        return Response(pending + results, status=200)
 
     @action(
         detail=False,
@@ -234,12 +219,53 @@ class DicomViewSet(ViewSet):
             }
 
             for future in as_completed(future_to_study):
-                results.append(future.result())
+                result = future.result()
+                if result is not None:
+                    results.append({**result, "is_pending": False})
+
+        results.sort(key=lambda s: s["study_date"] or "", reverse=True)
+        pending = get_pending_mpps_studies(service_request=service_request)
 
         return Response(
-            results,
+            pending + results,
             status=200,
         )
+
+
+def get_pending_mpps_studies(**filters):
+    """
+    Study-shaped rows for MPPS statuses whose service request doesn't have a
+    linked DICOM study yet (the sync task / study webhook hasn't linked it).
+    """
+    linked_study = RadiologyServiceRequest.objects.filter(
+        service_request=OuterRef("service_request"),
+        dicom_study__isnull=False,
+    )
+    qs = (
+        RadiologyMppsStatus.objects.filter(
+            ~Exists(linked_study),
+            deleted=False,
+            service_request__deleted=False,
+            **filters,
+        )
+        .select_related("service_request")
+        .order_by("-created_date")
+    )
+    return [
+        {
+            "external_id": mpps.external_id,
+            "study_uid": None,
+            "study_date": mpps.created_date,
+            "study_description": mpps.service_request.title,
+            "study_modalities": [],
+            "study_series": [],
+            "has_report": False,
+            "is_pending": True,
+            "mpps_status": mpps.status,
+            "service_request_id": mpps.service_request.external_id,
+        }
+        for mpps in qs
+    ]
 
 
 def fetch_study(dicom_study: DicomStudy):

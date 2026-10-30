@@ -3,6 +3,7 @@ from celery import shared_task
 
 from care_radiology.models.dicom_study import DicomStudy
 from care_radiology.models.radiology_service_request import RadiologyServiceRequest
+from care_radiology.utils.accession import ACCESSION_NUMBER_LENGTH, get_service_request_by_accession
 from care_radiology.utils.dicom import fetch_study
 from care.emr.models.service_request import ServiceRequest
 
@@ -17,9 +18,8 @@ def sync_dicom_studies():
             for row in rows:
                 study = fetch_study(row[1])
                 accession_number = study["study_accession"][0] if len(study["study_accession"]) > 0 else None
-                if accession_number and len(accession_number.strip()) == 16:
-                    sr_lookup_str = accession_number[:4] + "-" + accession_number[4:]
-                    sr = ServiceRequest.objects.get(external_id__endswith=sr_lookup_str)
+                if accession_number and len(accession_number.strip()) == ACCESSION_NUMBER_LENGTH:
+                    sr = get_service_request_by_accession(accession_number)
                     (ds, ds_created) = DicomStudy.objects.get_or_create(dicom_study_uid=study["study_uid"], patient=sr.patient, defaults={})
                     if (sr and ds):
                         RadiologyServiceRequest.objects.update_or_create(service_request=sr, dicom_study=ds, defaults={"raw_data": {}})

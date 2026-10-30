@@ -35,9 +35,9 @@ care_radiology_plugin = Plug(
     version="",  # Keep empty for local development
     configs={
         # Base URL for dcm4che DICOMweb API
-        "DCM4CHEE_DICOMWEB_BASEURL": "http://arc:8080/dcm4chee-arc/aets/DCM4CHEE",
+        "CARE_RADIOLOGY_DCM4CHEE_DICOMWEB_BASEURL": "http://arc:8080/dcm4chee-arc/aets/DCM4CHEE",
         # Secret used to verify incoming webhooks
-        "WEBHOOK_SECRET": "RADOMSECRET"
+        "CARE_RADIOLOGY_WEBHOOK_SECRET": "RADOMSECRET"
     },
 )
 plugs = [care_radiology_plugin]
@@ -109,8 +109,8 @@ radiology_plug = Plug(
     version="@main",
     configs={
         # can be defined as environment variables in production setup
-        "DCM4CHEE_DICOMWEB_BASEURL": "http://arc:8080/dcm4chee-arc/aets/DCM4CHEE",
-        "WEBHOOK_SECRET": "secure-webhook-secret"
+        "CARE_RADIOLOGY_DCM4CHEE_DICOMWEB_BASEURL": "http://arc:8080/dcm4chee-arc/aets/DCM4CHEE",
+        "CARE_RADIOLOGY_WEBHOOK_SECRET": "secure-webhook-secret"
     },
 )
 plugs = [radiology_plug]
